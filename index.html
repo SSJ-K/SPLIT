@@ -515,6 +515,85 @@ input[type="number"] { -moz-appearance: textfield; }
   color: var(--text-secondary);
   margin-left: 6px;
 }
+
+/* RECEIPTS */
+.balance-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 14px;
+  margin-bottom: 10px;
+  text-align: center;
+}
+.balance-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+.balance-amount {
+  font-family: var(--font-mono);
+  font-size: 32px;
+  font-weight: 700;
+  margin-top: 4px;
+  letter-spacing: -1px;
+}
+.balance-sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+.receipt-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--bg-input);
+}
+.receipt-item:last-child { border-bottom: none; }
+.receipt-item:active { opacity: 0.7; }
+.receipt-owed {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+}
+.settled-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--green);
+  background: var(--green-light);
+  border-radius: 10px;
+  padding: 2px 8px;
+  vertical-align: 1px;
+}
+.shared-chip {
+  padding: 8px 10px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  text-align: center;
+  min-width: 62px;
+  transition: all 0.15s;
+}
+.shared-chip.on {
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
+}
+.shared-chip.some {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
 </style>
 </head>
 <body>
@@ -545,8 +624,13 @@ let diningMethod = 'equal'; // equal | custom | itemized | exclusion
 let diningPeople = [{ name: '' }, { name: '' }];
 let diningCustomAmounts = {};
 let diningItems = [{ name: '', price: '', assignees: [] }];
-let diningExclusions = []; // { itemName, price, excluded: [personIndex] }
 let diningExclusionItems = [{ name: '', price: '', excluded: [] }];
+let diningEditingId = null;     // history entry being edited
+let diningHistoryExpanded = false;
+
+// Receipts state
+let editingReceipt = null; // null = history list, object = working copy being edited
+let receiptHistoryExpanded = false;
 
 // Preset editor state
 let editingPreset = null; // null = new, id = editing
@@ -561,7 +645,7 @@ function loadData() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) {}
-  return { presets: [], theme: 'light' };
+  return { presets: [], receipts: [], dinings: [], taxMode: 'half', theme: 'light' };
 }
 
 function saveData(data) {
@@ -569,6 +653,9 @@ function saveData(data) {
 }
 
 let DATA = loadData();
+if (!Array.isArray(DATA.receipts)) DATA.receipts = [];
+if (!Array.isArray(DATA.dinings)) DATA.dinings = [];
+if (DATA.taxMode !== 'half' && DATA.taxMode !== 'proportional') DATA.taxMode = 'half';
 
 // ============================================================
 // HELPERS
@@ -604,6 +691,7 @@ function renderTabBar() {
   const tabs = [
     { id: 'split', label: 'Split', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>' },
     { id: 'dining', label: 'Dining', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 002-2V2M7 2v20M21 15V2v0a5 5 0 00-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>' },
+    { id: 'receipts', label: 'Receipts', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 2v20l2-1.5 2 1.5 2-1.5 2 1.5 2-1.5 2 1.5 2-1.5 2 1.5V2l-2 1.5L16 2l-2 1.5L12 2l-2 1.5L8 2 6 3.5 4 2z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>' },
     { id: 'presets', label: 'Presets', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2z"/><path d="M9 7h6M9 12h6M9 17h4"/></svg>' },
     { id: 'settings', label: 'Settings', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>' },
   ];
@@ -629,6 +717,7 @@ function render() {
   switch (currentTab) {
     case 'split': renderSplit(); break;
     case 'dining': renderDining(); break;
+    case 'receipts': renderReceipts(); break;
     case 'presets': renderPresets(); break;
     case 'settings': renderSettings(); break;
     case 'preset-edit': renderPresetEdit(); break;
@@ -657,7 +746,7 @@ function renderSplit() {
     html += `<div class="form-group">
       <label class="form-label">Saved Presets</label>
       <div class="chip-group">
-        ${DATA.presets.map(p => `<div class="chip ${splitPresetId === p.id ? 'active' : ''}" onclick="selectSplitPreset('${p.id}')">${p.name}</div>`).join('')}
+        ${DATA.presets.map(p => `<div class="chip ${splitPresetId === p.id ? 'active' : ''}" onclick="selectSplitPreset('${p.id}')">${escHtml(p.name)}</div>`).join('')}
         <div class="chip ${splitPresetId === null ? 'active' : ''}" onclick="selectSplitPreset(null)">Custom</div>
       </div>
     </div>`;
@@ -675,8 +764,8 @@ function renderSplit() {
       <div id="split-people">`;
     splitCustomPeople.forEach((p, i) => {
       html += `<div class="person-row">
-        <input type="text" class="form-input" placeholder="Name" value="${p.name}" oninput="splitCustomPeople[${i}].name=this.value;renderSplitResults()">
-        <input type="number" inputmode="decimal" class="form-input ratio-input" placeholder="%" value="${p.ratio}" oninput="splitCustomPeople[${i}].ratio=this.value;renderSplitResults()">
+        <input type="text" class="form-input" placeholder="Name" value="${escHtml(p.name)}" oninput="splitCustomPeople[${i}].name=this.value;renderSplitResults()">
+        <input type="number" inputmode="decimal" class="form-input ratio-input" placeholder="%" value="${escHtml(p.ratio)}" oninput="splitCustomPeople[${i}].ratio=this.value;renderSplitResults()">
         ${splitCustomPeople.length > 2 ? `<button class="remove-person" onclick="removeSplitPerson(${i})">×</button>` : '<div style="width:32px"></div>'}
       </div>`;
     });
@@ -746,7 +835,7 @@ function renderSplitResults() {
     <div class="result-header">Each Person Owes</div>`;
   amounts.forEach(a => {
     h += `<div class="result-row">
-      <span class="result-name">${a.name}</span>
+      <span class="result-name">${escHtml(a.name)}</span>
       <span><span class="result-amount">$${fmt(a.amount)}</span><button class="result-copy-btn" onclick="copyAmount(${a.amount})">COPY</button></span>
     </div>`;
   });
@@ -754,7 +843,6 @@ function renderSplitResults() {
     <span class="result-total-label">Total</span>
     <span class="result-total-amount">$${fmt(total)}</span>
   </div></div>`;
-
   el.innerHTML = h;
 }
 
@@ -805,7 +893,7 @@ function renderDining() {
     <div id="dining-people">`;
   diningPeople.forEach((p, i) => {
     html += `<div class="person-row">
-      <input type="text" class="form-input" placeholder="Name" value="${p.name}" oninput="diningPeople[${i}].name=this.value;renderDiningResults()">
+      <input type="text" class="form-input" placeholder="Name" value="${escHtml(p.name)}" oninput="diningPeople[${i}].name=this.value;renderDiningResults()">
       ${diningPeople.length > 2 ? `<button class="remove-person" onclick="removeDiningPerson(${i})">×</button>` : ''}
     </div>`;
   });
@@ -849,6 +937,7 @@ function renderDining() {
 
   // Results
   html += '<div id="dining-results"></div>';
+  html += renderDiningHistoryCard();
 
   $('main-content').innerHTML = html;
   renderDiningResults();
@@ -918,7 +1007,7 @@ function renderDiningCustomInputs() {
   diningPeople.forEach((p, i) => {
     const name = p.name || `Person ${i + 1}`;
     html += `<div class="person-row">
-      <span style="flex:1;font-size:14px;font-weight:500">${name}</span>
+      <span style="flex:1;font-size:14px;font-weight:500">${escHtml(name)}</span>
       <div class="amount-input-wrap" style="width:120px;flex-shrink:0">
         <input type="number" inputmode="decimal" class="form-input" style="font-family:var(--font-mono);padding-left:24px;font-size:14px" placeholder="0.00" value="${diningCustomAmounts[i] || ''}" oninput="diningCustomAmounts[${i}]=this.value;renderDiningResults()">
       </div>
@@ -949,7 +1038,7 @@ function renderDiningItemizedInputs() {
   diningItems.forEach((item, i) => {
     html += `<div class="item-row">
       <div class="item-row-top">
-        <input type="text" class="form-input" placeholder="Item name" value="${item.name}" oninput="diningItems[${i}].name=this.value">
+        <input type="text" class="form-input" placeholder="Item name" value="${escHtml(item.name)}" oninput="diningItems[${i}].name=this.value">
         <div class="amount-input-wrap" style="width:90px;flex-shrink:0">
           <input type="number" inputmode="decimal" class="form-input item-price" style="padding-left:22px;font-size:14px" placeholder="0.00" value="${item.price}" oninput="diningItems[${i}].price=this.value;renderDiningResults()">
         </div>
@@ -959,7 +1048,7 @@ function renderDiningItemizedInputs() {
         ${diningPeople.map((p, pi) => {
           const name = p.name || `P${pi + 1}`;
           const active = item.assignees.includes(pi);
-          return `<div class="item-assignee-chip ${active ? 'active' : ''}" onclick="toggleItemAssignee(${i},${pi})">${name}</div>`;
+          return `<div class="item-assignee-chip ${active ? 'active' : ''}" onclick="toggleItemAssignee(${i},${pi})">${escHtml(name)}</div>`;
         }).join('')}
       </div>
     </div>`;
@@ -1000,7 +1089,7 @@ function renderDiningExclusionInputs() {
   diningExclusionItems.forEach((item, i) => {
     html += `<div class="exclusion-section">
       <div class="item-row-top" style="margin-bottom:6px">
-        <input type="text" class="form-input" placeholder="Item (e.g., bottle of wine)" value="${item.name}" oninput="diningExclusionItems[${i}].name=this.value">
+        <input type="text" class="form-input" placeholder="Item (e.g., bottle of wine)" value="${escHtml(item.name)}" oninput="diningExclusionItems[${i}].name=this.value">
         <div class="amount-input-wrap" style="width:90px;flex-shrink:0">
           <input type="number" inputmode="decimal" class="form-input item-price" style="padding-left:22px;font-size:14px" placeholder="0.00" value="${item.price}" oninput="diningExclusionItems[${i}].price=this.value;renderDiningResults()">
         </div>
@@ -1011,7 +1100,7 @@ function renderDiningExclusionInputs() {
         ${diningPeople.map((p, pi) => {
           const name = p.name || `P${pi + 1}`;
           const excluded = item.excluded.includes(pi);
-          return `<div class="item-assignee-chip ${excluded ? 'active' : ''}" onclick="toggleExclusion(${i},${pi})" style="${excluded ? 'background:var(--red);border-color:var(--red);' : ''}">${name}${excluded ? ' ✗' : ''}</div>`;
+          return `<div class="item-assignee-chip ${excluded ? 'active' : ''}" onclick="toggleExclusion(${i},${pi})" style="${excluded ? 'background:var(--red);border-color:var(--red);' : ''}">${escHtml(name)}${excluded ? ' ✗' : ''}</div>`;
         }).join('')}
       </div>
     </div>`;
@@ -1049,98 +1138,30 @@ function renderDiningResults() {
   const billTotal = parseFloat(diningTotal) || 0;
   if (billTotal <= 0 || diningPeople.length === 0) { el.innerHTML = ''; return; }
 
-  const tipAmt = billTotal * (diningTipPct / 100);
-  const grandTotal = billTotal + tipAmt;
-  const numPeople = diningPeople.length;
+  const grandTotal = billTotal * (1 + diningTipPct / 100);
 
-  let amounts = [];
-
-  if (diningMethod === 'equal') {
-    const perPerson = grandTotal / numPeople;
-    amounts = diningPeople.map((p, i) => ({
-      name: p.name || `Person ${i + 1}`,
-      amount: perPerson
-    }));
-
-  } else if (diningMethod === 'custom') {
-    const customVals = diningPeople.map((_, i) => parseFloat(diningCustomAmounts[i]) || 0);
-    const customTotal = customVals.reduce((s, v) => s + v, 0);
+  // Early-hide cases (unchanged behavior)
+  if (diningMethod === 'custom') {
+    const customTotal = diningPeople.reduce((s, _, i) => s + (parseFloat(diningCustomAmounts[i]) || 0), 0);
     if (customTotal === 0) { el.innerHTML = ''; return; }
-    amounts = diningPeople.map((p, i) => {
-      const share = customVals[i];
-      const tipShare = (share / customTotal) * tipAmt;
-      return { name: p.name || `Person ${i + 1}`, amount: share + tipShare };
-    });
-
   } else if (diningMethod === 'itemized') {
-    // Sum up item costs per person
-    const personTotals = new Array(numPeople).fill(0);
-    let assignedTotal = 0;
-    diningItems.forEach(item => {
-      const price = parseFloat(item.price) || 0;
-      if (item.assignees.length > 0) {
-        const share = price / item.assignees.length;
-        item.assignees.forEach(pi => { if (pi < numPeople) personTotals[pi] += share; });
-        assignedTotal += price;
-      }
-    });
+    const assignedTotal = diningItems.reduce((s, item) => s + (item.assignees.length > 0 ? (parseFloat(item.price) || 0) : 0), 0);
     if (assignedTotal === 0) { el.innerHTML = ''; return; }
-
-    // Unassigned portion split equally
-    const unassigned = billTotal - assignedTotal;
-    const unassignedPer = unassigned > 0 ? unassigned / numPeople : 0;
-
-    amounts = diningPeople.map((p, i) => {
-      const subtotal = personTotals[i] + unassignedPer;
-      const tipShare = (subtotal / billTotal) * tipAmt;
-      return { name: p.name || `Person ${i + 1}`, amount: subtotal + tipShare };
-    });
-
-  } else if (diningMethod === 'exclusion') {
-    // Start with full bill. For each exclusion item, only included people share that cost.
-    // Remaining bill (after exclusion items) split equally among all.
-    const personTotals = new Array(numPeople).fill(0);
-    let exclusionItemsTotal = 0;
-
-    diningExclusionItems.forEach(item => {
-      const price = parseFloat(item.price) || 0;
-      if (price <= 0) return;
-      exclusionItemsTotal += price;
-      const included = diningPeople.map((_, i) => i).filter(i => !item.excluded.includes(i));
-      if (included.length > 0) {
-        const share = price / included.length;
-        included.forEach(i => personTotals[i] += share);
-      }
-    });
-
-    // Remaining bill split equally
-    const remainingBill = billTotal - exclusionItemsTotal;
-    if (remainingBill > 0) {
-      const equalShare = remainingBill / numPeople;
-      personTotals.forEach((_, i) => personTotals[i] += equalShare);
-    }
-
-    // Add proportional tip
-    const preTipTotal = personTotals.reduce((s, v) => s + v, 0);
-    amounts = diningPeople.map((p, i) => {
-      const tipShare = preTipTotal > 0 ? (personTotals[i] / preTipTotal) * tipAmt : 0;
-      return { name: p.name || `Person ${i + 1}`, amount: personTotals[i] + tipShare };
-    });
   }
 
-  // Penny rounding
-  amounts = amounts.map(a => ({ ...a, amount: Math.round(a.amount * 100) / 100 }));
-  const roundedSum = amounts.reduce((s, a) => s + a.amount, 0);
-  const diff = Math.round((grandTotal - roundedSum) * 100) / 100;
-  if (Math.abs(diff) >= 0.01) {
-    amounts[0].amount = Math.round((amounts[0].amount + diff) * 100) / 100;
-  }
+  // Split math lives in computeDiningAmounts() — single source of truth
+  const vals = computeDiningAmounts({
+    total: diningTotal, tipPct: diningTipPct, method: diningMethod,
+    people: diningPeople, customAmounts: diningCustomAmounts,
+    items: diningItems, exclusionItems: diningExclusionItems
+  });
+  const amounts = diningPeople.map((p, i) => ({ name: p.name || `Person ${i + 1}`, amount: vals[i] || 0 }));
 
   let h = `<div class="result-card">
     <div class="result-header">Each Person Owes (incl. ${diningTipPct}% tip)</div>`;
   amounts.forEach(a => {
     h += `<div class="result-row">
-      <span class="result-name">${a.name}</span>
+      <span class="result-name">${escHtml(a.name)}</span>
       <span><span class="result-amount">$${fmt(a.amount)}</span><button class="result-copy-btn" onclick="copyAmount(${a.amount})">COPY</button></span>
     </div>`;
   });
@@ -1148,6 +1169,11 @@ function renderDiningResults() {
     <span class="result-total-label">Grand Total</span>
     <span class="result-total-amount">$${fmt(grandTotal)}</span>
   </div></div>`;
+  if (diningEditingId) {
+    h += '<div class="section-gap"></div><div class="flex-row"><button class="btn btn-primary flex-1" onclick="updateDiningHistory()">Update Entry</button><button class="btn btn-secondary flex-1" onclick="saveDiningToHistory()">Save as New</button></div><div class="section-gap"></div>';
+  } else {
+    h += '<div class="section-gap"></div><button class="btn btn-secondary" onclick="saveDiningToHistory()">Save to History</button><div class="section-gap"></div>';
+  }
 
   el.innerHTML = h;
 }
@@ -1168,10 +1194,10 @@ function renderPresets() {
   } else {
     html += '<div class="card">';
     DATA.presets.forEach(p => {
-      const detail = p.people.map(pp => `${pp.name || '?'}: ${pp.ratio}`).join(', ');
+      const detail = p.people.map(pp => `${escHtml(pp.name) || '?'}: ${escHtml(pp.ratio)}`).join(', ');
       html += `<div class="preset-item">
         <div onclick="usePresetInSplit('${p.id}')" style="flex:1;min-width:0">
-          <div class="preset-name">${p.name}</div>
+          <div class="preset-name">${escHtml(p.name)}</div>
           <div class="preset-detail">${detail}</div>
         </div>
         <div class="preset-actions">
@@ -1232,7 +1258,7 @@ function renderPresetEdit() {
   let html = `<div class="card">
     <div class="form-group">
       <label class="form-label">Preset Name</label>
-      <input type="text" class="form-input" placeholder="e.g., Rent, Electric, Dinner 3-way" value="${presetName}" oninput="presetName=this.value">
+      <input type="text" class="form-input" placeholder="e.g., Rent, Electric, Dinner 3-way" value="${escHtml(presetName)}" oninput="presetName=this.value">
     </div>
     <div class="form-group" style="margin-bottom:8px">
       <label class="form-label">People & Ratios</label>
@@ -1241,8 +1267,8 @@ function renderPresetEdit() {
 
   presetPeople.forEach((p, i) => {
     html += `<div class="person-row">
-      <input type="text" class="form-input" placeholder="Name" value="${p.name}" oninput="presetPeople[${i}].name=this.value">
-      <input type="number" inputmode="decimal" class="form-input ratio-input" placeholder="Ratio" value="${p.ratio}" oninput="presetPeople[${i}].ratio=this.value">
+      <input type="text" class="form-input" placeholder="Name" value="${escHtml(p.name)}" oninput="presetPeople[${i}].name=this.value">
+      <input type="number" inputmode="decimal" class="form-input ratio-input" placeholder="Ratio" value="${escHtml(p.ratio)}" oninput="presetPeople[${i}].ratio=this.value">
       ${presetPeople.length > 2 ? `<button class="remove-person" onclick="removePresetPerson(${i})">×</button>` : '<div style="width:32px"></div>'}
     </div>`;
   });
@@ -1260,7 +1286,7 @@ function renderPresetEdit() {
       const pct = (parseFloat(p.ratio) / totalRatio * 100);
       const amt = pct;
       html += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:14px">
-        <span>${p.name || 'Unnamed'}</span>
+        <span>${escHtml(p.name) || 'Unnamed'}</span>
         <span style="font-family:var(--font-mono)">${pct.toFixed(1)}% → $${fmt(amt)}</span>
       </div>`;
     });
@@ -1307,6 +1333,926 @@ function savePreset() {
 }
 
 // ============================================================
+// RECEIPTS TAB
+// ============================================================
+// Receipt schema v2:
+// { id, date, store, settled, tax, taxMode: 'half'|'proportional',
+//   people: ['Me', ...names], payer: index into people,
+//   items: [{ name, price, who: 'all' | [personIndices] }] }
+// v1 receipts ({person, items[].shared}) are migrated silently below.
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function normalizeReceipt(r) {
+  if (!Array.isArray(r.people) || r.people.length < 2) {
+    const other = r.person == null ? 'Partner' : (String(r.person).trim() || 'Other');
+    r.people = ['Me', other];
+    delete r.person;
+  }
+  r.people[0] = 'Me';
+  if (typeof r.payer !== 'number' || r.payer < 0 || r.payer >= r.people.length) r.payer = 0;
+  if (!Array.isArray(r.items)) r.items = [];
+  r.items.forEach(it => {
+    if (it.who !== 'all' && !Array.isArray(it.who)) {
+      it.who = it.shared === false ? [0] : 'all';
+    }
+    delete it.shared;
+    if (Array.isArray(it.who)) {
+      it.who = it.who.filter(i => typeof i === 'number' && i >= 0 && i < r.people.length);
+      if (it.who.length === 0) it.who = [0];
+    }
+  });
+  return r;
+}
+DATA.receipts = DATA.receipts.map(normalizeReceipt);
+
+function receiptNames(r) {
+  return r.people.map((n, i) => i === 0 ? 'Me' : (String(n).trim() || 'Person ' + (i + 1)));
+}
+
+// Always computed from raw data — never stored.
+function calcReceipt(r) {
+  const n = r.people.length;
+  const subtotals = new Array(n).fill(0);
+  let itemsTotal = 0;
+  (r.items || []).forEach(it => {
+    const p = parseFloat(it.price) || 0;
+    itemsTotal += p;
+    let sharers = it.who === 'all'
+      ? r.people.map((_, i) => i)
+      : (Array.isArray(it.who) && it.who.length ? it.who.filter(i => i < n) : [0]);
+    if (sharers.length === 0) sharers = [0];
+    const each = p / sharers.length;
+    sharers.forEach(i => { subtotals[i] += each; });
+  });
+  const tax = parseFloat(r.tax) || 0;
+  const totalBill = itemsTotal + tax;
+  const mode = r.taxMode === 'proportional' ? 'proportional' : 'half';
+  // 'half': tax splits equally among everyone. 'proportional': by each person's item share.
+  const totals = subtotals.map((s, i) => {
+    const taxShare = mode === 'proportional' ? (itemsTotal > 0 ? tax * (s / itemsTotal) : 0) : tax / n;
+    return Math.round((s + taxShare) * 100) / 100;
+  });
+  const payer = (typeof r.payer === 'number' && r.payer >= 0 && r.payer < n) ? r.payer : 0;
+  // Penny rounding: payer absorbs the difference
+  const roundDiff = Math.round((totalBill - totals.reduce((s, t) => s + t, 0)) * 100) / 100;
+  if (Math.abs(roundDiff) >= 0.01) totals[payer] = Math.round((totals[payer] + roundDiff) * 100) / 100;
+  const owedToMe = payer === 0 ? Math.round(totals.reduce((s, t, i) => i === 0 ? s : s + t, 0) * 100) / 100 : 0;
+  const iOwe = payer !== 0 ? totals[0] : 0;
+  const net = Math.round((owedToMe - iOwe) * 100) / 100;
+  return { itemsTotal, tax, totalBill, totals, payer, owedToMe, iOwe, net };
+}
+
+// name -> net amount (positive: they owe me; negative: I owe them), unsettled only
+function receiptBalances() {
+  const byPerson = {};
+  DATA.receipts.filter(r => !r.settled).forEach(r => {
+    const c = calcReceipt(r);
+    const names = receiptNames(r);
+    if (c.payer === 0) {
+      names.forEach((name, i) => {
+        if (i === 0 || c.totals[i] <= 0.004) return;
+        byPerson[name] = (byPerson[name] || 0) + c.totals[i];
+      });
+    } else if (c.iOwe > 0.004) {
+      const name = names[c.payer];
+      byPerson[name] = (byPerson[name] || 0) - c.iOwe;
+    }
+  });
+  return byPerson;
+}
+
+function renderReceipts() {
+  if (editingReceipt) { renderReceiptEdit(); return; }
+  $('header').innerHTML = '<h1>Receipts</h1><div class="header-sub">Shared shopping tracker</div>';
+
+  const unsettled = DATA.receipts.filter(r => !r.settled);
+  const byPerson = receiptBalances();
+  const persons = Object.keys(byPerson);
+  const net = persons.reduce((s, k) => s + byPerson[k], 0);
+
+  let html = `<div class="balance-card">
+    <div class="balance-label">${net < -0.004 ? 'Net: You Owe' : (persons.length === 1 ? escHtml(persons[0]) + ' Owes You' : 'Owed to You')}</div>
+    <div class="balance-amount" style="color:${net > 0.004 ? 'var(--green)' : (net < -0.004 ? 'var(--red)' : 'var(--text)')}">$${fmt(Math.abs(net))}</div>
+    <div class="balance-sub">${unsettled.length} unsettled receipt${unsettled.length !== 1 ? 's' : ''}</div>`;
+  if (persons.length > 1) {
+    html += `<div style="margin-top:10px;border-top:1px solid var(--bg-input);padding-top:8px">`;
+    persons.forEach(who => {
+      const v = byPerson[who];
+      html += `<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px">
+        <span style="color:var(--text-secondary)">${escHtml(who)} ${v >= 0 ? 'owes you' : '— you owe'}</span>
+        <span style="font-family:var(--font-mono);font-weight:600;color:${v >= 0 ? 'var(--green)' : 'var(--red)'}">$${fmt(Math.abs(v))}</span>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+  html += `</div>`;
+
+  html += `<button class="btn btn-primary" onclick="newReceipt()">+ New Receipt</button>
+  <div class="section-gap"></div>`;
+
+  if (DATA.receipts.length === 0) {
+    html += `<div class="card" style="text-align:center;padding:24px 14px">
+      <div style="font-size:14px;color:var(--text-secondary)">No receipts yet</div>
+      <div class="helper-text" style="margin-top:4px">Track a shopping trip and split it with anyone</div>
+    </div>`;
+  } else {
+    const sorted = DATA.receipts.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    const shownReceipts = receiptHistoryExpanded ? sorted : sorted.slice(0, 5);
+    html += `<div class="card">
+      <div class="form-label" style="margin-bottom:2px">History</div>`;
+    shownReceipts.forEach(r => {
+      const c = calcReceipt(r);
+      const names = receiptNames(r);
+      const others = names.slice(1).join(', ');
+      const amt = c.payer === 0 ? c.owedToMe : c.iOwe;
+      const amtColor = r.settled ? 'var(--text-tertiary)' : (c.payer === 0 ? 'var(--green)' : 'var(--red)');
+      html += `<div class="receipt-item">
+        <div onclick="openReceipt('${r.id}')" style="flex:1;min-width:0;cursor:pointer">
+          <div class="preset-name">${escHtml(r.store) || 'Untitled'}${r.settled ? ' <span class="settled-badge">Settled</span>' : ''}</div>
+          <div class="preset-detail">${escHtml(r.date)} · ${escHtml(others)} · ${r.items.length} item${r.items.length !== 1 ? 's' : ''} · $${fmt(c.totalBill)} total</div>
+        </div>
+        <div onclick="openReceipt('${r.id}')" style="text-align:right;flex-shrink:0;cursor:pointer">
+          <div class="receipt-owed" style="color:${amtColor}">${c.payer === 0 ? '' : '−'}$${fmt(amt)}</div>
+        </div>
+        <button class="btn-icon" onclick="toggleSettled('${r.id}')" style="${r.settled ? '' : 'color:var(--green)'}">${r.settled ? '↺' : '✓'}</button>
+      </div>`;
+    });
+    if (sorted.length > 5) {
+      html += `<div style="text-align:center;padding-top:8px;border-top:1px solid var(--bg-input)">
+        <button class="result-copy-btn" onclick="toggleReceiptHistoryExpand()">${receiptHistoryExpanded ? 'Show recent only' : 'Show all ' + sorted.length}</button>
+      </div>`;
+    }
+    html += `</div>
+    <div class="flex-row" style="margin-top:2px">
+      <button class="btn btn-secondary btn-small flex-1" onclick="exportReceiptsCSV()">Export CSV</button>
+      <button class="btn btn-secondary btn-small flex-1" onclick="importReceiptsCSV()">Import CSV</button>
+    </div>
+    <div class="helper-text" style="text-align:center;margin-top:6px">Back up regularly — iOS can evict PWA storage</div>`;
+  }
+
+  $('main-content').innerHTML = html;
+}
+
+function newReceipt() {
+  haptic();
+  editingReceipt = {
+    id: genId(), date: todayStr(), store: '', settled: false,
+    tax: '', taxMode: DATA.taxMode === 'proportional' ? 'proportional' : 'half',
+    people: ['Me', 'Partner'], payer: 0,
+    items: [{ name: '', price: '', who: 'all' }],
+    _new: true
+  };
+  render();
+}
+
+function openReceipt(id) {
+  haptic();
+  const r = DATA.receipts.find(x => x.id === id);
+  if (!r) return;
+  normalizeReceipt(r);
+  editingReceipt = {
+    id: r.id, date: r.date, store: r.store, settled: !!r.settled,
+    tax: r.tax, taxMode: r.taxMode,
+    people: r.people.slice(), payer: r.payer,
+    items: r.items.length
+      ? r.items.map(it => ({ name: it.name, price: it.price, who: it.who === 'all' ? 'all' : it.who.slice() }))
+      : [{ name: '', price: '', who: 'all' }]
+  };
+  render();
+}
+
+function toggleSettled(id) {
+  const r = DATA.receipts.find(x => x.id === id);
+  if (!r) return;
+  r.settled = !r.settled;
+  saveData(DATA);
+  haptic();
+  showToast(r.settled ? 'Marked settled' : 'Marked unsettled');
+  render();
+}
+
+function toggleReceiptHistoryExpand() {
+  haptic();
+  receiptHistoryExpanded = !receiptHistoryExpanded;
+  render();
+}
+
+function closeReceiptEdit() {
+  editingReceipt = null;
+  render();
+}
+
+function renderReceiptEdit() {
+  const r = editingReceipt;
+  const names = receiptNames(r);
+  $('header').innerHTML = `<h1>${r._new ? 'New Receipt' : 'Edit Receipt'}</h1><div class="header-sub">Who shared what</div>`;
+
+  let html = `<div class="card">
+    <div class="flex-row" style="align-items:flex-start">
+      <div class="form-group flex-1" style="margin-bottom:0">
+        <label class="form-label">Store</label>
+        <input type="text" class="form-input" placeholder="e.g., Costco" value="${escHtml(r.store)}" oninput="editingReceipt.store=this.value">
+      </div>
+      <div class="form-group" style="width:150px;flex-shrink:0;margin-bottom:0">
+        <label class="form-label">Date</label>
+        <input type="date" class="form-input" value="${escHtml(r.date)}" oninput="editingReceipt.date=this.value">
+      </div>
+    </div>
+  </div>`;
+
+  // People & payer
+  html += `<div class="card">
+    <div class="form-group" style="margin-bottom:8px">
+      <label class="form-label">Splitting With</label>
+    </div>`;
+  r.people.forEach((name, i) => {
+    if (i === 0) return;
+    html += `<div class="person-row">
+      <input type="text" class="form-input" placeholder="Name" value="${escHtml(name)}" oninput="editingReceipt.people[${i}]=this.value;renderReceiptResults()">
+      ${r.people.length > 2 ? `<button class="remove-person" onclick="removeReceiptPerson(${i})">×</button>` : '<div style="width:32px"></div>'}
+    </div>`;
+  });
+  html += `<button class="btn btn-secondary btn-small" style="margin-top:4px" onclick="addReceiptPerson()">+ Add Person</button>
+    <div class="form-group" style="margin:12px 0 0">
+      <label class="form-label">Paid By</label>
+      <div class="chip-group">
+        ${names.map((n, i) => `<div class="chip ${r.payer === i ? 'active' : ''}" onclick="setReceiptPayer(${i})">${escHtml(n)}</div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+
+  // Items
+  html += `<div class="card">
+    <div class="form-group" style="margin-bottom:8px">
+      <label class="form-label">Items</label>
+      <div class="helper-text">Tap the chip to cycle: ÷ All → Mine → Some…</div>
+    </div>`;
+  r.items.forEach((it, i) => {
+    const isAll = it.who === 'all';
+    const isMine = Array.isArray(it.who) && it.who.length === 1 && it.who[0] === 0;
+    const isCustom = !isAll && !isMine;
+    const label = isAll ? '÷ All' : (isMine ? 'Mine' : '÷ ' + it.who.length);
+    html += `<div class="item-row">
+      <div class="item-row-top" style="margin-bottom:${isCustom ? '6px' : '0'}">
+        <input type="text" class="form-input" placeholder="Item" value="${escHtml(it.name)}" oninput="editingReceipt.items[${i}].name=this.value">
+        <div class="amount-input-wrap" style="width:84px;flex-shrink:0">
+          <input type="number" inputmode="decimal" class="form-input item-price" style="padding-left:22px;font-size:14px" placeholder="0.00" value="${escHtml(it.price)}" oninput="editingReceipt.items[${i}].price=this.value;renderReceiptResults()">
+        </div>
+        <div class="shared-chip ${isAll ? 'on' : ''}${isCustom ? ' some' : ''}" onclick="cycleItemWho(${i})">${label}</div>
+        ${r.items.length > 1 ? `<button class="remove-person" onclick="removeReceiptItem(${i})">×</button>` : ''}
+      </div>
+      ${isCustom ? `<div class="item-assignees">${names.map((n, pi) => `<div class="item-assignee-chip ${it.who.includes(pi) ? 'active' : ''}" onclick="toggleItemWho(${i},${pi})">${escHtml(n)}</div>`).join('')}</div>` : ''}
+    </div>`;
+  });
+  html += `<button class="btn btn-secondary btn-small" style="margin-top:4px" onclick="addReceiptItem()">+ Add Item</button>
+  </div>`;
+
+  // Tax
+  html += `<div class="card">
+    <div class="form-group" style="margin-bottom:10px">
+      <label class="form-label">Tax</label>
+      <div class="amount-input-wrap">
+        <input type="number" inputmode="decimal" class="form-input" style="font-family:var(--font-mono);padding-left:24px" placeholder="0.00" value="${escHtml(r.tax)}" oninput="editingReceipt.tax=this.value;renderReceiptResults()">
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:0">
+      <label class="form-label">Tax Split</label>
+      <div class="chip-group">
+        <div class="chip ${r.taxMode !== 'proportional' ? 'active' : ''}" onclick="setReceiptTaxMode('half')">Equal split</div>
+        <div class="chip ${r.taxMode === 'proportional' ? 'active' : ''}" onclick="setReceiptTaxMode('proportional')">Proportional to items</div>
+      </div>
+    </div>
+  </div>`;
+
+  // Results
+  html += '<div id="receipt-results"></div>';
+
+  // Settled
+  html += `<div class="card">
+    <div class="setting-row" style="border-bottom:none;padding:2px 0">
+      <span class="setting-label">Settled</span>
+      <div class="toggle ${r.settled ? 'on' : ''}" onclick="editingReceipt.settled=!editingReceipt.settled;haptic();render()"></div>
+    </div>
+  </div>`;
+
+  html += `<div class="section-gap"></div>
+    <button class="btn btn-primary" onclick="saveReceipt()">Save Receipt</button>
+    <div class="section-gap"></div>
+    <button class="btn btn-secondary" onclick="closeReceiptEdit()">Cancel</button>`;
+  if (!r._new) {
+    html += `<div class="section-gap"></div>
+    <button class="btn btn-danger" onclick="deleteReceipt()">Delete Receipt</button>`;
+  }
+
+  $('main-content').innerHTML = html;
+  renderReceiptResults();
+}
+
+function renderReceiptResults() {
+  const el = $('receipt-results');
+  if (!el || !editingReceipt) return;
+  const r = editingReceipt;
+  const c = calcReceipt(r);
+  if (c.totalBill <= 0) { el.innerHTML = ''; return; }
+  const names = receiptNames(r);
+  let h = `<div class="result-card">
+    <div class="result-header">Split — paid by ${escHtml(names[c.payer])}</div>`;
+  names.forEach((n, i) => {
+    h += `<div class="result-row">
+      <span class="result-name">${escHtml(n)}${i === c.payer ? ' <span style="font-size:11px;color:var(--text-tertiary)">(paid)</span>' : ''}</span>
+      <span><span class="result-amount">$${fmt(c.totals[i])}</span>${i !== c.payer ? `<button class="result-copy-btn" onclick="copyAmount(${c.totals[i]})">COPY</button>` : ''}</span>
+    </div>`;
+  });
+  if (c.payer === 0) {
+    h += `<div class="result-total-row">
+      <span class="result-total-label">Owed to me</span>
+      <span class="result-total-amount" style="color:var(--green)">$${fmt(c.owedToMe)}</span>
+    </div>`;
+  } else {
+    h += `<div class="result-total-row">
+      <span class="result-total-label">I owe ${escHtml(names[c.payer])}</span>
+      <span class="result-total-amount" style="color:var(--red)">$${fmt(c.iOwe)}</span>
+    </div>`;
+  }
+  h += `<div class="result-total-row">
+    <span class="result-total-label">Total bill</span>
+    <span class="result-total-amount">$${fmt(c.totalBill)}</span>
+  </div></div>`;
+  el.innerHTML = h;
+}
+
+function cycleItemWho(i) {
+  haptic();
+  const it = editingReceipt.items[i];
+  if (it.who === 'all') {
+    it.who = [0];
+  } else if (Array.isArray(it.who) && it.who.length === 1 && it.who[0] === 0) {
+    it.who = editingReceipt.people.map((_, idx) => idx); // 'Some…' starts with everyone
+  } else {
+    it.who = 'all';
+  }
+  render();
+}
+
+function toggleItemWho(i, pi) {
+  haptic();
+  const it = editingReceipt.items[i];
+  if (it.who === 'all') it.who = editingReceipt.people.map((_, idx) => idx);
+  const idx = it.who.indexOf(pi);
+  if (idx === -1) it.who.push(pi);
+  else it.who.splice(idx, 1);
+  if (it.who.length === 0) it.who = [0];
+  render();
+}
+
+function addReceiptItem() {
+  editingReceipt.items.push({ name: '', price: '', who: 'all' });
+  render();
+}
+
+function removeReceiptItem(i) {
+  editingReceipt.items.splice(i, 1);
+  render();
+}
+
+function addReceiptPerson() {
+  editingReceipt.people.push('');
+  render();
+}
+
+function removeReceiptPerson(i) {
+  const r = editingReceipt;
+  r.people.splice(i, 1);
+  r.items.forEach(it => {
+    if (Array.isArray(it.who)) {
+      it.who = it.who.filter(x => x !== i).map(x => x > i ? x - 1 : x);
+      if (it.who.length === 0) it.who = [0];
+    }
+  });
+  if (r.payer === i) r.payer = 0;
+  else if (r.payer > i) r.payer--;
+  render();
+}
+
+function setReceiptPayer(i) {
+  haptic();
+  editingReceipt.payer = i;
+  render();
+}
+
+function setReceiptTaxMode(mode) {
+  haptic();
+  editingReceipt.taxMode = mode;
+  render();
+}
+
+function saveReceipt() {
+  const r = editingReceipt;
+  // Drop unnamed people, remapping item assignments and payer
+  const keepIdx = [0];
+  for (let i = 1; i < r.people.length; i++) {
+    if (String(r.people[i]).trim()) keepIdx.push(i);
+  }
+  if (keepIdx.length < 2) { showToast('Add at least one person'); return; }
+  const mapIdx = {};
+  keepIdx.forEach((old, ni) => { mapIdx[old] = ni; });
+  const people = keepIdx.map((old, ni) => ni === 0 ? 'Me' : String(r.people[old]).trim());
+  const items = r.items
+    .filter(it => String(it.name).trim() || parseFloat(it.price))
+    .map(it => {
+      let who = it.who;
+      if (who !== 'all') {
+        who = who.filter(x => mapIdx[x] != null).map(x => mapIdx[x]);
+        if (who.length === 0) who = [0];
+        if (who.length === people.length) who = 'all';
+      }
+      return {
+        name: String(it.name).trim(),
+        price: Math.round((parseFloat(it.price) || 0) * 100) / 100,
+        who
+      };
+    });
+  if (!String(r.store).trim() && items.length === 0) { showToast('Add a store name or items'); return; }
+  const clean = {
+    id: r.id,
+    date: r.date || todayStr(),
+    store: String(r.store).trim(),
+    settled: !!r.settled,
+    tax: Math.round((parseFloat(r.tax) || 0) * 100) / 100,
+    taxMode: r.taxMode === 'proportional' ? 'proportional' : 'half',
+    people,
+    payer: mapIdx[r.payer] != null ? mapIdx[r.payer] : 0,
+    items
+  };
+  const idx = DATA.receipts.findIndex(x => x.id === r.id);
+  if (idx === -1) DATA.receipts.push(clean);
+  else DATA.receipts[idx] = clean;
+  saveData(DATA);
+  editingReceipt = null;
+  haptic();
+  showToast('Receipt saved');
+  render();
+}
+
+function deleteReceipt() {
+  if (!confirm('Delete this receipt?')) return;
+  DATA.receipts = DATA.receipts.filter(x => x.id !== editingReceipt.id);
+  saveData(DATA);
+  editingReceipt = null;
+  haptic();
+  showToast('Receipt deleted');
+  render();
+}
+
+// CSV EXPORT / IMPORT — one row per item.
+// Columns: Receipt ID, Date, Store, Item, Price, Shared, Tax, Tax Mode, Settled, People, Payer, Item People
+// Shared=true means split among everyone. "Item People" lists names (incl. Me) for partial splits.
+// Old exports (with a "Person" column, no People/Payer) still import as 2-person receipts.
+function exportReceiptsCSV() {
+  if (DATA.receipts.length === 0) { showToast('No receipts to export'); return; }
+  const rows = ['Receipt ID,Date,Store,Item,Price,Shared,Tax,Tax Mode,Settled,People,Payer,Item People'];
+  DATA.receipts.forEach(r => {
+    normalizeReceipt(r);
+    const names = receiptNames(r);
+    const peopleCol = names.slice(1).join('; ');
+    const payerCol = names[r.payer];
+    const push = (item, price, shared, itemPeople) => rows.push(
+      [r.id, r.date, r.store, item, price, shared, r.tax, r.taxMode, r.settled, peopleCol, payerCol, itemPeople].map(csvQ).join(',')
+    );
+    if (r.items.length === 0) push('', '', '', '');
+    r.items.forEach(it => {
+      const isAll = it.who === 'all';
+      const itemPeople = isAll ? '' : it.who.map(i => names[i]).join('; ');
+      push(it.name, it.price, isAll, itemPeople);
+    });
+  });
+  downloadCSV(rows, 'split-receipts-' + todayStr() + '.csv');
+  haptic();
+  showToast('Exported ' + DATA.receipts.length + ' receipt' + (DATA.receipts.length !== 1 ? 's' : ''));
+}
+
+function importReceiptsCSV() { pickCSVFile(doImportReceiptsCSV); }
+
+function parseCSVText(text) {
+  const rows = [];
+  let row = [], cur = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = false;
+      } else cur += ch;
+    } else if (ch === '"') {
+      inQ = true;
+    } else if (ch === ',') {
+      row.push(cur); cur = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cur); cur = '';
+      if (row.length > 1 || row[0] !== '') rows.push(row);
+      row = [];
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur !== '' || row.length > 0) {
+    row.push(cur);
+    if (row.length > 1 || row[0] !== '') rows.push(row);
+  }
+  return rows;
+}
+
+function doImportReceiptsCSV(text) {
+  const rows = parseCSVText(text);
+  if (rows.length < 2) { showToast('No rows found'); return; }
+  const header = rows[0].map(h => String(h).trim().toLowerCase());
+  const ci = {
+    id: header.indexOf('receipt id'),
+    date: header.indexOf('date'),
+    store: header.indexOf('store'),
+    item: header.indexOf('item'),
+    price: header.indexOf('price'),
+    shared: header.indexOf('shared'),
+    tax: header.indexOf('tax'),
+    taxMode: header.indexOf('tax mode'),
+    settled: header.indexOf('settled'),
+    person: header.indexOf('person'),       // legacy v1
+    people: header.indexOf('people'),       // v2
+    payer: header.indexOf('payer'),         // v2
+    itemPeople: header.indexOf('item people') // v2
+  };
+  if (ci.id === -1 || ci.date === -1 || ci.price === -1) { showToast('Unrecognized CSV format'); return; }
+  const get = (cells, idx) => idx === -1 ? '' : (cells[idx] || '');
+  const map = {}, order = [];
+  rows.slice(1).forEach(cells => {
+    const id = String(get(cells, ci.id)).trim();
+    if (!id) return;
+    if (!map[id]) {
+      let people;
+      if (ci.people !== -1 && String(get(cells, ci.people)).trim()) {
+        people = ['Me'].concat(String(get(cells, ci.people)).split(';').map(s => s.trim()).filter(Boolean));
+      } else {
+        const legacy = String(get(cells, ci.person)).trim() || 'Partner';
+        people = ['Me', legacy];
+      }
+      if (people.length < 2) people = ['Me', 'Partner'];
+      const payerName = String(get(cells, ci.payer)).trim().toLowerCase();
+      let payer = 0;
+      if (payerName) {
+        const pIdx = people.findIndex(n => String(n).trim().toLowerCase() === payerName);
+        if (pIdx !== -1) payer = pIdx;
+      }
+      map[id] = {
+        id,
+        date: String(get(cells, ci.date)).trim(),
+        store: String(get(cells, ci.store)).trim(),
+        settled: String(get(cells, ci.settled)).trim().toLowerCase() === 'true',
+        tax: Math.round((parseFloat(get(cells, ci.tax)) || 0) * 100) / 100,
+        taxMode: String(get(cells, ci.taxMode)).trim().toLowerCase() === 'proportional' ? 'proportional' : 'half',
+        people, payer,
+        items: []
+      };
+      order.push(id);
+    }
+    const rec = map[id];
+    const name = String(get(cells, ci.item)).trim();
+    const price = parseFloat(get(cells, ci.price));
+    if (name || !isNaN(price)) {
+      const sharedVal = String(get(cells, ci.shared)).trim().toLowerCase() === 'true';
+      const ipRaw = String(get(cells, ci.itemPeople)).trim();
+      let who;
+      if (ipRaw) {
+        const wanted = ipRaw.split(';').map(s => s.trim().toLowerCase()).filter(Boolean);
+        who = [];
+        rec.people.forEach((n, i) => {
+          if (wanted.indexOf(String(n).trim().toLowerCase()) !== -1) who.push(i);
+        });
+        if (who.length === 0) who = [0];
+      } else {
+        who = sharedVal ? 'all' : [0];
+      }
+      rec.items.push({
+        name,
+        price: isNaN(price) ? 0 : Math.round(price * 100) / 100,
+        who
+      });
+    }
+  });
+  if (order.length === 0) { showToast('No receipts found in CSV'); return; }
+  let added = 0, updated = 0;
+  order.forEach(id => {
+    normalizeReceipt(map[id]);
+    const idx = DATA.receipts.findIndex(x => x.id === id);
+    if (idx === -1) { DATA.receipts.push(map[id]); added++; }
+    else { DATA.receipts[idx] = map[id]; updated++; }
+  });
+  saveData(DATA);
+  haptic();
+  showToast('Imported: ' + added + ' new, ' + updated + ' updated');
+  render();
+}
+
+function setDefaultTaxMode(mode) {
+  haptic();
+  DATA.taxMode = mode;
+  saveData(DATA);
+  render();
+}
+
+// ============================================================
+// SPLIT & DINING HISTORY
+// ============================================================
+function csvQ(v) {
+  v = String(v == null ? '' : v);
+  return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+
+function downloadCSV(rows, name) {
+  const blob = new Blob([rows.join('\r\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+function pickCSVFile(handler) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,text/csv';
+  input.onchange = () => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try { handler(String(r.result)); }
+      catch (e) { showToast('Import failed — bad CSV'); }
+    };
+    r.readAsText(f);
+  };
+  input.click();
+}
+
+// --- DINING HISTORY ---
+const DINING_METHOD_LABELS = { equal: 'Equal split', custom: 'Custom amounts', itemized: 'Itemized', exclusion: 'Exclusions' };
+
+function buildDiningSnapshot() {
+  const total = parseFloat(diningTotal);
+  if (!total || total <= 0) { showToast('Enter a bill total first'); return null; }
+  return {
+    total: Math.round(total * 100) / 100,
+    tipPct: diningTipPct,
+    method: diningMethod,
+    people: diningPeople.map(p => ({ name: p.name })),
+    customAmounts: { ...diningCustomAmounts },
+    items: diningItems.map(it => ({ name: it.name, price: it.price, assignees: it.assignees.slice() })),
+    exclusionItems: diningExclusionItems.map(it => ({ name: it.name, price: it.price, excluded: it.excluded.slice() }))
+  };
+}
+
+function clearDiningForm() {
+  diningTotal = '';
+  diningCustomAmounts = {};
+  diningItems = [{ name: '', price: '', assignees: [] }];
+  diningExclusionItems = [{ name: '', price: '', excluded: [] }];
+  diningEditingId = null;
+}
+
+function saveDiningToHistory() {
+  const snap = buildDiningSnapshot();
+  if (!snap) return;
+  DATA.dinings.unshift({ id: genId(), date: todayStr(), total: snap.total, tipPct: snap.tipPct, method: snap.method, people: snap.people, customAmounts: snap.customAmounts, items: snap.items, exclusionItems: snap.exclusionItems });
+  saveData(DATA);
+  clearDiningForm();
+  haptic();
+  showToast('Saved to history');
+  render();
+}
+
+function updateDiningHistory() {
+  const snap = buildDiningSnapshot();
+  if (!snap) return;
+  const idx = DATA.dinings.findIndex(x => x.id === diningEditingId);
+  if (idx === -1) { showToast('Entry no longer exists'); diningEditingId = null; render(); return; }
+  DATA.dinings[idx] = { id: DATA.dinings[idx].id, date: DATA.dinings[idx].date, total: snap.total, tipPct: snap.tipPct, method: snap.method, people: snap.people, customAmounts: snap.customAmounts, items: snap.items, exclusionItems: snap.exclusionItems };
+  saveData(DATA);
+  clearDiningForm();
+  haptic();
+  showToast('History entry updated');
+  render();
+}
+
+function cancelDiningEdit() {
+  haptic();
+  diningEditingId = null;
+  render();
+}
+
+function toggleDiningHistoryExpand() {
+  haptic();
+  diningHistoryExpanded = !diningHistoryExpanded;
+  render();
+}
+
+function loadDiningHistory(id) {
+  const d = DATA.dinings.find(x => x.id === id);
+  if (!d) return;
+  haptic();
+  diningEditingId = id;
+  diningTotal = String(d.total);
+  diningTipPct = d.tipPct;
+  diningMethod = DINING_METHOD_LABELS[d.method] ? d.method : 'equal';
+  diningPeople = (d.people && d.people.length ? d.people : [{ name: '' }, { name: '' }]).map(p => ({ name: p.name || '' }));
+  diningCustomAmounts = { ...(d.customAmounts || {}) };
+  diningItems = (d.items && d.items.length ? d.items : [{ name: '', price: '', assignees: [] }])
+    .map(it => ({ name: it.name || '', price: it.price || '', assignees: Array.isArray(it.assignees) ? it.assignees.slice() : [] }));
+  diningExclusionItems = (d.exclusionItems && d.exclusionItems.length ? d.exclusionItems : [{ name: '', price: '', excluded: [] }])
+    .map(it => ({ name: it.name || '', price: it.price || '', excluded: Array.isArray(it.excluded) ? it.excluded.slice() : [] }));
+  render();
+}
+
+function deleteDiningHistory(id) {
+  if (!confirm('Delete this entry?')) return;
+  DATA.dinings = DATA.dinings.filter(x => x.id !== id);
+  saveData(DATA);
+  haptic();
+  showToast('Deleted');
+  render();
+}
+
+function renderDiningHistoryCard() {
+  if (DATA.dinings.length === 0) return '';
+  const shown = diningHistoryExpanded ? DATA.dinings : DATA.dinings.slice(0, 5);
+  let h = `<div class="card">
+    <div class="form-label" style="margin-bottom:2px">History</div>`;
+  if (diningEditingId) {
+    h += `<div style="display:flex;justify-content:space-between;align-items:center;background:var(--accent-light);border-radius:var(--radius);padding:8px 10px;margin:6px 0">
+      <span style="font-size:12px;color:var(--accent);font-weight:500">Editing an entry — update or save as new above</span>
+      <button class="result-copy-btn" onclick="cancelDiningEdit()">Cancel</button>
+    </div>`;
+  }
+  shown.forEach(d => {
+    const grand = d.total * (1 + (d.tipPct || 0) / 100);
+    const editing = d.id === diningEditingId;
+    h += `<div class="preset-item">
+      <div onclick="loadDiningHistory('${d.id}')" style="flex:1;min-width:0">
+        <div class="preset-name" style="${editing ? 'color:var(--accent)' : ''}">${editing ? '● ' : ''}$${fmt(grand)} <span style="font-weight:400;color:var(--text-secondary)">incl. ${d.tipPct}% tip</span></div>
+        <div class="preset-detail">${escHtml(d.date)} · ${DINING_METHOD_LABELS[d.method] || d.method} · ${d.people.length} people</div>
+      </div>
+      <div class="preset-actions">
+        <button class="btn-icon" onclick="deleteDiningHistory('${d.id}')" style="color:var(--red)">✕</button>
+      </div>
+    </div>`;
+  });
+  if (DATA.dinings.length > 5) {
+    h += `<div style="text-align:center;padding-top:8px;border-top:1px solid var(--bg-input)">
+      <button class="result-copy-btn" onclick="toggleDiningHistoryExpand()">${diningHistoryExpanded ? 'Show recent only' : 'Show all ' + DATA.dinings.length}</button>
+    </div>`;
+  }
+  h += `</div>
+  <div class="flex-row" style="margin-top:2px">
+    <button class="btn btn-secondary btn-small flex-1" onclick="exportDiningsCSV()">Export CSV</button>
+    <button class="btn btn-secondary btn-small flex-1" onclick="importDiningsCSV()">Import CSV</button>
+  </div>
+  <div class="section-gap"></div>`;
+  return h;
+}
+
+// Computed per-person share (incl. tip) for a stored dining record.
+// Display-only (CSV readability) — mirrors renderDiningResults; import ignores it.
+function computeDiningAmounts(d) {
+  const billTotal = parseFloat(d.total) || 0;
+  const n = (d.people || []).length;
+  if (billTotal <= 0 || n === 0) return [];
+  const tipAmt = billTotal * ((d.tipPct || 0) / 100);
+  const grandTotal = billTotal + tipAmt;
+  let amounts = new Array(n).fill(0);
+  if (d.method === 'custom') {
+    const vals = d.people.map((_, i) => parseFloat(d.customAmounts && d.customAmounts[i]) || 0);
+    const ct = vals.reduce((s, v) => s + v, 0);
+    amounts = vals.map(v => ct > 0 ? v + (v / ct) * tipAmt : 0);
+  } else if (d.method === 'itemized') {
+    const pt = new Array(n).fill(0);
+    let assigned = 0;
+    (d.items || []).forEach(it => {
+      const price = parseFloat(it.price) || 0;
+      const as = (Array.isArray(it.assignees) ? it.assignees : []).filter(pi => pi < n);
+      if (as.length > 0) { const share = price / as.length; as.forEach(pi => { pt[pi] += share; }); assigned += price; }
+    });
+    const unPer = billTotal - assigned > 0 ? (billTotal - assigned) / n : 0;
+    amounts = pt.map(v => { const sub = v + unPer; return sub + (sub / billTotal) * tipAmt; });
+  } else if (d.method === 'exclusion') {
+    const pt = new Array(n).fill(0);
+    let exclTotal = 0;
+    (d.exclusionItems || []).forEach(it => {
+      const price = parseFloat(it.price) || 0;
+      if (price <= 0) return;
+      exclTotal += price;
+      const excluded = Array.isArray(it.excluded) ? it.excluded : [];
+      const inc = d.people.map((_, i) => i).filter(i => !excluded.includes(i));
+      if (inc.length > 0) { const share = price / inc.length; inc.forEach(i => { pt[i] += share; }); }
+    });
+    const rem = billTotal - exclTotal;
+    if (rem > 0) { const eq = rem / n; pt.forEach((_, i) => { pt[i] += eq; }); }
+    const pre = pt.reduce((s, v) => s + v, 0);
+    amounts = pt.map(v => v + (pre > 0 ? (v / pre) * tipAmt : 0));
+  } else {
+    amounts = amounts.map(() => grandTotal / n);
+  }
+  amounts = amounts.map(a => Math.round(a * 100) / 100);
+  const preSum = amounts.reduce((s, a) => s + a, 0);
+  if (preSum > 0) {
+    const diff = Math.round((grandTotal - preSum) * 100) / 100;
+    if (Math.abs(diff) >= 0.01) amounts[0] = Math.round((amounts[0] + diff) * 100) / 100;
+  }
+  return amounts;
+}
+
+// Dining CSV — one row per person; items/exclusions carried as JSON (repeated per row):
+// Dining ID, Date, Total, Tip %, Method, Person, Custom Amount, Items JSON, Exclusions JSON
+function exportDiningsCSV() {
+  if (DATA.dinings.length === 0) { showToast('No history to export'); return; }
+  const rows = ['Dining ID,Date,Total,Tip %,Method,Person,Custom Amount,Items JSON,Exclusions JSON,Amount Owed'];
+  DATA.dinings.forEach(d => {
+    const itemsJson = JSON.stringify(d.items || []);
+    const exclJson = JSON.stringify(d.exclusionItems || []);
+    const base = [d.id, d.date, d.total, d.tipPct, d.method];
+    const owed = computeDiningAmounts(d);
+    if (!d.people.length) rows.push([...base, '', '', itemsJson, exclJson, ''].map(csvQ).join(','));
+    d.people.forEach((p, i) => {
+      const ca = d.customAmounts && d.customAmounts[i] != null ? d.customAmounts[i] : '';
+      rows.push([...base, p.name, ca, itemsJson, exclJson, owed[i] != null ? owed[i].toFixed(2) : ''].map(csvQ).join(','));
+    });
+  });
+  downloadCSV(rows, 'dining-history-' + todayStr() + '.csv');
+  haptic();
+  showToast('Exported ' + DATA.dinings.length + ' bill' + (DATA.dinings.length !== 1 ? 's' : ''));
+}
+
+function importDiningsCSV() { pickCSVFile(doImportDiningsCSV); }
+
+function doImportDiningsCSV(text) {
+  const rows = parseCSVText(text);
+  if (rows.length < 2) { showToast('No rows found'); return; }
+  const header = rows[0].map(h => String(h).trim().toLowerCase());
+  const ci = {
+    id: header.indexOf('dining id'), date: header.indexOf('date'), total: header.indexOf('total'),
+    tip: header.indexOf('tip %'), method: header.indexOf('method'), person: header.indexOf('person'),
+    custom: header.indexOf('custom amount'), items: header.indexOf('items json'), excl: header.indexOf('exclusions json')
+  };
+  if (ci.id === -1 || ci.total === -1) { showToast('Unrecognized CSV format'); return; }
+  const get = (cells, idx) => idx === -1 ? '' : (cells[idx] || '');
+  const map = {}, order = [];
+  rows.slice(1).forEach(cells => {
+    const id = String(get(cells, ci.id)).trim();
+    if (!id) return;
+    if (!map[id]) {
+      const method = String(get(cells, ci.method)).trim();
+      let items = [], excl = [];
+      try { const v = JSON.parse(get(cells, ci.items)); if (Array.isArray(v)) items = v; } catch (e) {}
+      try { const v = JSON.parse(get(cells, ci.excl)); if (Array.isArray(v)) excl = v; } catch (e) {}
+      map[id] = {
+        id,
+        date: String(get(cells, ci.date)).trim(),
+        total: Math.round((parseFloat(get(cells, ci.total)) || 0) * 100) / 100,
+        tipPct: parseFloat(get(cells, ci.tip)) || 0,
+        method: DINING_METHOD_LABELS[method] ? method : 'equal',
+        people: [],
+        customAmounts: {},
+        items: items.map(it => ({ name: String(it.name || ''), price: it.price || '', assignees: Array.isArray(it.assignees) ? it.assignees : [] })),
+        exclusionItems: excl.map(it => ({ name: String(it.name || ''), price: it.price || '', excluded: Array.isArray(it.excluded) ? it.excluded : [] }))
+      };
+      order.push(id);
+    }
+    const name = String(get(cells, ci.person)).trim();
+    const ca = String(get(cells, ci.custom)).trim();
+    const pi = map[id].people.length;
+    map[id].people.push({ name });
+    if (ca !== '') map[id].customAmounts[pi] = ca;
+  });
+  if (order.length === 0) { showToast('No bills found in CSV'); return; }
+  let added = 0, updated = 0;
+  order.forEach(id => {
+    const idx = DATA.dinings.findIndex(x => x.id === id);
+    if (idx === -1) { DATA.dinings.unshift(map[id]); added++; }
+    else { DATA.dinings[idx] = map[id]; updated++; }
+  });
+  saveData(DATA);
+  haptic();
+  showToast('Imported: ' + added + ' new, ' + updated + ' updated');
+  render();
+}
+
+// ============================================================
 // SETTINGS TAB
 // ============================================================
 function renderSettings() {
@@ -1319,6 +2265,16 @@ function renderSettings() {
       <span class="setting-label">Dark Mode</span>
       <div class="toggle ${isDark ? 'on' : ''}" onclick="toggleTheme()"></div>
     </div>
+    <div class="setting-row">
+      <div>
+        <div class="setting-label">Receipt Tax Split</div>
+        <div class="helper-text">Default for new receipts</div>
+      </div>
+      <div class="chip-group" style="flex-wrap:nowrap">
+        <div class="chip ${DATA.taxMode !== 'proportional' ? 'active' : ''}" onclick="setDefaultTaxMode('half')">Equal</div>
+        <div class="chip ${DATA.taxMode === 'proportional' ? 'active' : ''}" onclick="setDefaultTaxMode('proportional')">Prop.</div>
+      </div>
+    </div>
   </div>`;
 
   // Data management
@@ -1326,6 +2282,16 @@ function renderSettings() {
     <div class="form-label" style="margin-bottom:10px">Data</div>
     <div class="setting-row">
       <span class="setting-label">${DATA.presets.length} saved preset${DATA.presets.length !== 1 ? 's' : ''}</span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">${DATA.receipts.length} saved receipt${DATA.receipts.length !== 1 ? 's' : ''}</span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">${DATA.dinings.length} dining bill${DATA.dinings.length !== 1 ? 's' : ''}</span>
+    </div>
+    <div class="flex-row" style="margin:10px 0">
+      <button class="btn btn-secondary btn-small flex-1" onclick="exportAllJSON()">Export All Data (JSON)</button>
+      <button class="btn btn-secondary btn-small flex-1" onclick="importAllJSON()">Import All Data (JSON)</button>
     </div>
     <div class="setting-row" style="border-bottom:none">
       <span class="setting-label" style="color:var(--red)">Clear All Data</span>
@@ -1335,7 +2301,7 @@ function renderSettings() {
 
   // About
   html += `<div class="card" style="text-align:center">
-    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.0</div>
+    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.1</div>
     <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Data stored locally on this device</div>
   </div>`;
 
@@ -1358,11 +2324,67 @@ function toggleTheme() {
   render();
 }
 
+// Full-data JSON backup / restore
+function exportAllJSON() {
+  const blob = new Blob([JSON.stringify(DATA, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'split-backup-' + todayStr() + '.json';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  haptic();
+  showToast('Backup downloaded');
+}
+
+function importAllJSON() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.onchange = () => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      let obj;
+      try { obj = JSON.parse(String(r.result)); }
+      catch (e) { showToast('Import failed: not valid JSON'); return; }
+      if (!obj || typeof obj !== 'object' || !Array.isArray(obj.presets) || !Array.isArray(obj.receipts) || !Array.isArray(obj.dinings)) {
+        showToast('Import failed: not a SPLIT backup'); return;
+      }
+      if (!confirm('Replace ALL current data with this backup? Your current data will be overwritten.')) return;
+      DATA = {
+        presets: obj.presets,
+        receipts: obj.receipts.map(normalizeReceipt),
+        dinings: obj.dinings,
+        taxMode: obj.taxMode === 'proportional' ? 'proportional' : 'half',
+        theme: obj.theme === 'dark' ? 'dark' : 'light'
+      };
+      saveData(DATA);
+      if (DATA.theme === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        document.querySelector('meta[name="theme-color"]').content = '#2a2a2a';
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+        document.querySelector('meta[name="theme-color"]').content = '#ffffff';
+      }
+      splitPresetId = null;
+      diningEditingId = null;
+      editingReceipt = null;
+      haptic();
+      showToast('Backup restored');
+      render();
+    };
+    r.readAsText(f);
+  };
+  input.click();
+}
+
 function clearAllData() {
-  if (!confirm('Delete all presets? This cannot be undone.')) return;
+  if (!confirm('Delete all presets, receipts, and history? This cannot be undone.')) return;
   if (!confirm('Are you sure?')) return;
   const theme = DATA.theme;
-  DATA = { presets: [], theme };
+  DATA = { presets: [], receipts: [], dinings: [], taxMode: 'half', theme };
   saveData(DATA);
   splitPresetId = null;
   haptic();
