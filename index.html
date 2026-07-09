@@ -594,6 +594,33 @@ input[type="number"] { -moz-appearance: textfield; }
   border-color: var(--accent);
   color: white;
 }
+/* SCROLL FABS */
+.scroll-fabs {
+  position: fixed;
+  right: calc(50vw - min(50vw, 215px) + 12px);
+  bottom: calc(14px + var(--safe-bottom));
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 50;
+}
+.scroll-fabs.show { display: flex; }
+.scroll-fab {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 17px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.92;
+}
+.scroll-fab:active { background: var(--bg-input); }
 </style>
 </head>
 <body>
@@ -603,6 +630,10 @@ input[type="number"] { -moz-appearance: textfield; }
   <div class="content" id="main-content"></div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="scroll-fabs" id="scroll-fabs">
+  <button class="scroll-fab" onclick="scrollContentTo('top')" aria-label="Scroll to top">↑</button>
+  <button class="scroll-fab" onclick="scrollContentTo('bottom')" aria-label="Scroll to bottom">↓</button>
+</div>
 
 <script>
 // ============================================================
@@ -627,6 +658,8 @@ let diningItems = [{ name: '', price: '', assignees: [] }];
 let diningExclusionItems = [{ name: '', price: '', excluded: [] }];
 let diningEditingId = null;     // history entry being edited
 let diningHistoryExpanded = false;
+let diningPlace = '';
+let diningDate = '';
 
 // Receipts state
 let editingReceipt = null; // null = history list, object = working copy being edited
@@ -656,6 +689,84 @@ let DATA = loadData();
 if (!Array.isArray(DATA.receipts)) DATA.receipts = [];
 if (!Array.isArray(DATA.dinings)) DATA.dinings = [];
 if (DATA.taxMode !== 'half' && DATA.taxMode !== 'proportional') DATA.taxMode = 'half';
+
+// ============================================================
+// SESSION PERSISTENCE — in-progress work survives the PWA
+// being killed in the background (iOS suspends/reloads PWAs)
+// ============================================================
+const SESSION_KEY = 'split_calc_session_v1';
+let scrollPos = {}; // remembered scroll position per view
+
+function viewKey() {
+  return (currentTab === 'receipts' && editingReceipt) ? 'receipt-edit' : currentTab;
+}
+
+function saveSession() {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      currentTab, editingReceipt, receiptHistoryExpanded,
+      splitTotal, splitPresetId, splitCustomPeople,
+      diningTotal, diningTipPct, diningMethod, diningPeople, diningCustomAmounts,
+      diningItems, diningExclusionItems, diningEditingId, diningPlace, diningDate,
+      editingPreset, presetName, presetPeople,
+      scrollPos
+    }));
+  } catch (e) {}
+}
+
+function restoreSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (!s || typeof s !== 'object') return;
+    if (['split','dining','receipts','presets','settings','preset-edit'].includes(s.currentTab)) currentTab = s.currentTab;
+    if (s.editingReceipt && typeof s.editingReceipt === 'object' && Array.isArray(s.editingReceipt.people) && Array.isArray(s.editingReceipt.items)) editingReceipt = s.editingReceipt;
+    if (typeof s.receiptHistoryExpanded === 'boolean') receiptHistoryExpanded = s.receiptHistoryExpanded;
+    if (typeof s.splitTotal === 'string') splitTotal = s.splitTotal;
+    if (s.splitPresetId != null) splitPresetId = s.splitPresetId;
+    if (Array.isArray(s.splitCustomPeople) && s.splitCustomPeople.length) splitCustomPeople = s.splitCustomPeople;
+    if (typeof s.diningTotal === 'string') diningTotal = s.diningTotal;
+    if (typeof s.diningTipPct === 'number') diningTipPct = s.diningTipPct;
+    if (typeof s.diningMethod === 'string') diningMethod = s.diningMethod;
+    if (Array.isArray(s.diningPeople) && s.diningPeople.length) diningPeople = s.diningPeople;
+    if (s.diningCustomAmounts && typeof s.diningCustomAmounts === 'object') diningCustomAmounts = s.diningCustomAmounts;
+    if (Array.isArray(s.diningItems) && s.diningItems.length) diningItems = s.diningItems;
+    if (Array.isArray(s.diningExclusionItems) && s.diningExclusionItems.length) diningExclusionItems = s.diningExclusionItems;
+    if (s.diningEditingId != null) diningEditingId = s.diningEditingId;
+    if (typeof s.diningPlace === 'string') diningPlace = s.diningPlace;
+    if (typeof s.diningDate === 'string') diningDate = s.diningDate;
+    if (s.editingPreset !== undefined) editingPreset = s.editingPreset;
+    if (typeof s.presetName === 'string') presetName = s.presetName;
+    if (Array.isArray(s.presetPeople) && s.presetPeople.length) presetPeople = s.presetPeople;
+    if (s.scrollPos && typeof s.scrollPos === 'object') scrollPos = s.scrollPos;
+  } catch (e) {}
+}
+
+let sessionTimer;
+function queueSaveSession() {
+  clearTimeout(sessionTimer);
+  sessionTimer = setTimeout(() => { saveSession(); updateScrollFabs(); }, 300);
+}
+// Every keystroke in any field queues a draft save
+document.addEventListener('input', queueSaveSession, true);
+// Flush immediately when the app is backgrounded or closed
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSession(); });
+window.addEventListener('pagehide', saveSession);
+
+// --- SCROLL MEMORY + JUMP BUTTONS ---
+function updateScrollFabs() {
+  const c = $('main-content');
+  const fabs = $('scroll-fabs');
+  if (!c || !fabs) return;
+  fabs.classList.toggle('show', c.scrollHeight - c.clientHeight > 300);
+}
+
+function scrollContentTo(where) {
+  haptic();
+  const c = $('main-content');
+  c.scrollTo({ top: where === 'top' ? 0 : c.scrollHeight, behavior: 'smooth' });
+}
 
 // ============================================================
 // HELPERS
@@ -722,6 +833,12 @@ function render() {
     case 'settings': renderSettings(); break;
     case 'preset-edit': renderPresetEdit(); break;
   }
+
+  // Restore remembered scroll position for this view (innerHTML swap resets it)
+  const c = $('main-content');
+  c.scrollTop = scrollPos[viewKey()] || 0;
+  updateScrollFabs();
+  queueSaveSession();
 }
 
 // ============================================================
@@ -851,8 +968,23 @@ function renderSplitResults() {
 // ============================================================
 function renderDining() {
   $('header').innerHTML = '<h1>Dining</h1><div class="header-sub">Tip & split calculator</div>';
+  if (!diningDate) diningDate = todayStr();
 
   let html = '';
+
+  // Place + Date
+  html += `<div class="card">
+    <div class="flex-row" style="align-items:flex-start">
+      <div class="form-group flex-1" style="margin-bottom:0">
+        <label class="form-label">Place</label>
+        <input type="text" class="form-input" placeholder="e.g., Thai Basil" value="${escHtml(diningPlace)}" oninput="diningPlace=this.value">
+      </div>
+      <div class="form-group" style="width:150px;flex-shrink:0;margin-bottom:0">
+        <label class="form-label">Date</label>
+        <input type="date" class="form-input" value="${escHtml(diningDate)}" oninput="diningDate=this.value">
+      </div>
+    </div>
+  </div>`;
 
   // Total + Tip
   html += `<div class="card">
@@ -1502,6 +1634,7 @@ function renderReceipts() {
 
 function newReceipt() {
   haptic();
+  scrollPos['receipt-edit'] = 0;
   editingReceipt = {
     id: genId(), date: todayStr(), store: '', settled: false,
     tax: '', taxMode: DATA.taxMode === 'proportional' ? 'proportional' : 'half',
@@ -1514,6 +1647,7 @@ function newReceipt() {
 
 function openReceipt(id) {
   haptic();
+  scrollPos['receipt-edit'] = 0;
   const r = DATA.receipts.find(x => x.id === id);
   if (!r) return;
   normalizeReceipt(r);
@@ -2010,6 +2144,8 @@ function buildDiningSnapshot() {
   if (!total || total <= 0) { showToast('Enter a bill total first'); return null; }
   return {
     total: Math.round(total * 100) / 100,
+    place: String(diningPlace).trim(),
+    date: diningDate || todayStr(),
     tipPct: diningTipPct,
     method: diningMethod,
     people: diningPeople.map(p => ({ name: p.name })),
@@ -2021,6 +2157,8 @@ function buildDiningSnapshot() {
 
 function clearDiningForm() {
   diningTotal = '';
+  diningPlace = '';
+  diningDate = '';
   diningCustomAmounts = {};
   diningItems = [{ name: '', price: '', assignees: [] }];
   diningExclusionItems = [{ name: '', price: '', excluded: [] }];
@@ -2030,7 +2168,7 @@ function clearDiningForm() {
 function saveDiningToHistory() {
   const snap = buildDiningSnapshot();
   if (!snap) return;
-  DATA.dinings.unshift({ id: genId(), date: todayStr(), total: snap.total, tipPct: snap.tipPct, method: snap.method, people: snap.people, customAmounts: snap.customAmounts, items: snap.items, exclusionItems: snap.exclusionItems });
+  DATA.dinings.unshift({ id: genId(), date: snap.date, place: snap.place, total: snap.total, tipPct: snap.tipPct, method: snap.method, people: snap.people, customAmounts: snap.customAmounts, items: snap.items, exclusionItems: snap.exclusionItems });
   saveData(DATA);
   clearDiningForm();
   haptic();
@@ -2043,7 +2181,7 @@ function updateDiningHistory() {
   if (!snap) return;
   const idx = DATA.dinings.findIndex(x => x.id === diningEditingId);
   if (idx === -1) { showToast('Entry no longer exists'); diningEditingId = null; render(); return; }
-  DATA.dinings[idx] = { id: DATA.dinings[idx].id, date: DATA.dinings[idx].date, total: snap.total, tipPct: snap.tipPct, method: snap.method, people: snap.people, customAmounts: snap.customAmounts, items: snap.items, exclusionItems: snap.exclusionItems };
+  DATA.dinings[idx] = { id: DATA.dinings[idx].id, date: snap.date, place: snap.place, total: snap.total, tipPct: snap.tipPct, method: snap.method, people: snap.people, customAmounts: snap.customAmounts, items: snap.items, exclusionItems: snap.exclusionItems };
   saveData(DATA);
   clearDiningForm();
   haptic();
@@ -2069,6 +2207,8 @@ function loadDiningHistory(id) {
   haptic();
   diningEditingId = id;
   diningTotal = String(d.total);
+  diningPlace = d.place || '';
+  diningDate = d.date || '';
   diningTipPct = d.tipPct;
   diningMethod = DINING_METHOD_LABELS[d.method] ? d.method : 'equal';
   diningPeople = (d.people && d.people.length ? d.people : [{ name: '' }, { name: '' }]).map(p => ({ name: p.name || '' }));
@@ -2105,7 +2245,7 @@ function renderDiningHistoryCard() {
     const editing = d.id === diningEditingId;
     h += `<div class="preset-item">
       <div onclick="loadDiningHistory('${d.id}')" style="flex:1;min-width:0">
-        <div class="preset-name" style="${editing ? 'color:var(--accent)' : ''}">${editing ? '● ' : ''}$${fmt(grand)} <span style="font-weight:400;color:var(--text-secondary)">incl. ${d.tipPct}% tip</span></div>
+        <div class="preset-name" style="${editing ? 'color:var(--accent)' : ''}">${editing ? '● ' : ''}${d.place ? escHtml(d.place) + ' · ' : ''}$${fmt(grand)} <span style="font-weight:400;color:var(--text-secondary)">incl. ${d.tipPct}% tip</span></div>
         <div class="preset-detail">${escHtml(d.date)} · ${DINING_METHOD_LABELS[d.method] || d.method} · ${d.people.length} people</div>
       </div>
       <div class="preset-actions">
@@ -2181,11 +2321,11 @@ function computeDiningAmounts(d) {
 // Dining ID, Date, Total, Tip %, Method, Person, Custom Amount, Items JSON, Exclusions JSON
 function exportDiningsCSV() {
   if (DATA.dinings.length === 0) { showToast('No history to export'); return; }
-  const rows = ['Dining ID,Date,Total,Tip %,Method,Person,Custom Amount,Items JSON,Exclusions JSON,Amount Owed'];
+  const rows = ['Dining ID,Date,Place,Total,Tip %,Method,Person,Custom Amount,Items JSON,Exclusions JSON,Amount Owed'];
   DATA.dinings.forEach(d => {
     const itemsJson = JSON.stringify(d.items || []);
     const exclJson = JSON.stringify(d.exclusionItems || []);
-    const base = [d.id, d.date, d.total, d.tipPct, d.method];
+    const base = [d.id, d.date, d.place || '', d.total, d.tipPct, d.method];
     const owed = computeDiningAmounts(d);
     if (!d.people.length) rows.push([...base, '', '', itemsJson, exclJson, ''].map(csvQ).join(','));
     d.people.forEach((p, i) => {
@@ -2207,6 +2347,7 @@ function doImportDiningsCSV(text) {
   const ci = {
     id: header.indexOf('dining id'), date: header.indexOf('date'), total: header.indexOf('total'),
     tip: header.indexOf('tip %'), method: header.indexOf('method'), person: header.indexOf('person'),
+    place: header.indexOf('place'),
     custom: header.indexOf('custom amount'), items: header.indexOf('items json'), excl: header.indexOf('exclusions json')
   };
   if (ci.id === -1 || ci.total === -1) { showToast('Unrecognized CSV format'); return; }
@@ -2223,6 +2364,7 @@ function doImportDiningsCSV(text) {
       map[id] = {
         id,
         date: String(get(cells, ci.date)).trim(),
+        place: String(get(cells, ci.place)).trim(),
         total: Math.round((parseFloat(get(cells, ci.total)) || 0) * 100) / 100,
         tipPct: parseFloat(get(cells, ci.tip)) || 0,
         method: DINING_METHOD_LABELS[method] ? method : 'equal',
@@ -2301,7 +2443,7 @@ function renderSettings() {
 
   // About
   html += `<div class="card" style="text-align:center">
-    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.1</div>
+    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.2</div>
     <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Data stored locally on this device</div>
   </div>`;
 
@@ -2387,6 +2529,10 @@ function clearAllData() {
   DATA = { presets: [], receipts: [], dinings: [], taxMode: 'half', theme };
   saveData(DATA);
   splitPresetId = null;
+  editingReceipt = null;
+  clearDiningForm();
+  scrollPos = {};
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
   haptic();
   showToast('All data cleared');
   render();
@@ -2395,6 +2541,13 @@ function clearAllData() {
 // ============================================================
 // INIT
 // ============================================================
+restoreSession();
+
+$('main-content').addEventListener('scroll', () => {
+  scrollPos[viewKey()] = $('main-content').scrollTop;
+  queueSaveSession();
+}, { passive: true });
+
 if (DATA.theme === 'dark') {
   document.documentElement.setAttribute('data-theme', 'dark');
   document.querySelector('meta[name="theme-color"]').content = '#2a2a2a';
