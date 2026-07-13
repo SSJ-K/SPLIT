@@ -720,7 +720,7 @@ function restoreSession() {
     if (!raw) return;
     const s = JSON.parse(raw);
     if (!s || typeof s !== 'object') return;
-    if (['split','dining','receipts','presets','settings','preset-edit'].includes(s.currentTab)) currentTab = s.currentTab;
+    if (['split','dining','receipts','scan','presets','settings','preset-edit'].includes(s.currentTab)) currentTab = s.currentTab;
     if (s.editingReceipt && typeof s.editingReceipt === 'object' && Array.isArray(s.editingReceipt.people) && Array.isArray(s.editingReceipt.items)) editingReceipt = s.editingReceipt;
     if (typeof s.receiptHistoryExpanded === 'boolean') receiptHistoryExpanded = s.receiptHistoryExpanded;
     if (typeof s.splitTotal === 'string') splitTotal = s.splitTotal;
@@ -803,6 +803,7 @@ function renderTabBar() {
     { id: 'split', label: 'Split', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>' },
     { id: 'dining', label: 'Dining', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 002-2V2M7 2v20M21 15V2v0a5 5 0 00-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/></svg>' },
     { id: 'receipts', label: 'Receipts', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 2v20l2-1.5 2 1.5 2-1.5 2 1.5 2-1.5 2 1.5 2-1.5 2 1.5V2l-2 1.5L16 2l-2 1.5L12 2l-2 1.5L8 2 6 3.5 4 2z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>' },
+    { id: 'scan', label: 'Scan', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>' },
     { id: 'presets', label: 'Presets', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2z"/><path d="M9 7h6M9 12h6M9 17h4"/></svg>' },
     { id: 'settings', label: 'Settings', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>' },
   ];
@@ -829,6 +830,7 @@ function render() {
     case 'split': renderSplit(); break;
     case 'dining': renderDining(); break;
     case 'receipts': renderReceipts(); break;
+    case 'scan': renderScan(); break;
     case 'presets': renderPresets(); break;
     case 'settings': renderSettings(); break;
     case 'preset-edit': renderPresetEdit(); break;
@@ -964,6 +966,137 @@ function renderSplitResults() {
 }
 
 // ============================================================
+// SCAN TAB + PASTE FROM CLAUDE
+// ============================================================
+const SCAN_PROMPT = `Extract the data from this receipt photo. Output ONLY a JSON object in exactly this format, with no commentary, no markdown fences, no explanation:
+{"store": "Store Name", "date": "YYYY-MM-DD", "total": 0.00, "tax": 0.00, "items": [{"name": "Item name", "price": 0.00}]}
+Rules: "total" is the final post-tax total. "tax" is the tax amount as its own field (0 if none shown). Include every line item with its price; combine an item and its modifiers into one line. Exclude tip lines, subtotals, and payment info. Use the receipt's date; if unreadable, use null. Shorten item names to 3 words max.`;
+
+function renderScan() {
+  $('header').innerHTML = '<h1>Scan</h1><div class="header-sub">Receipt photo → Claude → SPLIT</div>';
+
+  let html = `<div class="card">
+    <div style="font-size:14px;color:var(--text-secondary);line-height:1.5">Use the Claude app to read a receipt photo, then paste the result into Dining or Receipts.</div>
+  </div>`;
+
+  const steps = [
+    'Open Claude app → start an Incognito chat',
+    'Attach a photo of your receipt',
+    'Paste the scan prompt below and send',
+    'Copy Claude\u2019s JSON reply',
+    'Open the Dining or Receipts tab and tap \u201cPaste from Claude\u201d'
+  ];
+  html += `<div class="card">
+    <div class="form-label" style="margin-bottom:8px">How it works</div>
+    ${steps.map((s, i) => `<div style="display:flex;gap:10px;align-items:flex-start;padding:5px 0">
+      <div style="width:22px;height:22px;border-radius:50%;background:var(--bg-input);color:var(--text-secondary);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i + 1}</div>
+      <div style="font-size:14px;line-height:1.45">${s}</div>
+    </div>`).join('')}
+  </div>`;
+
+  html += `<div class="card">
+    <div class="form-label" style="margin-bottom:8px">Scan Prompt</div>
+    <div style="font-family:var(--font-mono);font-size:11.5px;line-height:1.55;color:var(--text-secondary);background:var(--bg-input);border-radius:8px;padding:10px 12px;white-space:pre-wrap;word-break:break-word;user-select:all">${escHtml(SCAN_PROMPT)}</div>
+    <button class="btn btn-primary" style="margin-top:10px" onclick="copyScanPrompt()">Copy Prompt</button>
+  </div>`;
+
+  $('main-content').innerHTML = html;
+}
+
+function copyScanPrompt() {
+  navigator.clipboard.writeText(SCAN_PROMPT).then(() => {
+    haptic();
+    showToast('Prompt copied');
+  }).catch(() => showToast('Copy failed'));
+}
+
+// --- Shared paste UI ---
+let pasteOpenFor = null; // 'dining' | 'receipts' | null
+
+function togglePasteBox(which) {
+  haptic();
+  pasteOpenFor = (pasteOpenFor === which) ? null : which;
+  render();
+}
+
+function renderPasteCard(which) {
+  if (pasteOpenFor !== which) {
+    return `<button class="btn btn-secondary btn-small" style="width:100%" onclick="togglePasteBox('${which}')">Paste from Claude</button>
+    <div class="section-gap"></div>`;
+  }
+  return `<div class="card">
+    <div class="form-group" style="margin-bottom:8px">
+      <label class="form-label">Paste from Claude</label>
+      <div class="helper-text">Paste Claude\u2019s JSON reply from the Scan workflow</div>
+    </div>
+    <textarea id="paste-box-${which}" class="form-input" rows="5" style="font-family:var(--font-mono);font-size:12px;resize:vertical;width:100%" placeholder='{"store": "...", "total": 0.00, "items": [...]}'></textarea>
+    <div class="flex-row" style="margin-top:8px">
+      <button class="btn btn-primary btn-small flex-1" onclick="importPasted('${which}')">Import</button>
+      <button class="btn btn-secondary btn-small flex-1" onclick="togglePasteBox('${which}')">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function parseClaudeReceipt(raw) {
+  let txt = String(raw || '').trim();
+  // Strip markdown code fences if present
+  txt = txt.replace(/^```[a-z]*\s*/i, '').replace(/\s*```\s*$/, '').trim();
+  let obj;
+  try { obj = JSON.parse(txt); } catch (e) { return null; }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const total = typeof obj.total === 'number' ? obj.total : parseFloat(obj.total);
+  if (!isFinite(total)) return null;
+  if (!Array.isArray(obj.items)) return null;
+  const items = obj.items
+    .filter(it => it && typeof it === 'object')
+    .map(it => ({
+      name: String(it.name || '').slice(0, 80),
+      price: isFinite(parseFloat(it.price)) ? String(Math.round(parseFloat(it.price) * 100) / 100) : ''
+    }));
+  if (items.length === 0) return null;
+  const tax = isFinite(parseFloat(obj.tax)) ? Math.round(parseFloat(obj.tax) * 100) / 100 : 0;
+  const dateOk = typeof obj.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obj.date);
+  return {
+    store: String(obj.store || '').slice(0, 80),
+    date: dateOk ? obj.date : todayStr(),
+    total: Math.round(total * 100) / 100,
+    tax,
+    items
+  };
+}
+
+function importPasted(which) {
+  const box = $('paste-box-' + which);
+  const parsed = parseClaudeReceipt(box ? box.value : '');
+  if (!parsed) {
+    showToast('Couldn\u2019t read that — paste Claude\u2019s JSON reply exactly');
+    return;
+  }
+  haptic();
+  pasteOpenFor = null;
+  if (which === 'dining') {
+    diningTotal = String(parsed.total);
+    if (parsed.store) diningPlace = parsed.store;
+    diningDate = parsed.date;
+    diningMethod = 'itemized';
+    diningItems = parsed.items.map(it => ({ name: it.name, price: it.price, assignees: [] }));
+    showToast('Imported ' + parsed.items.length + ' items');
+    render();
+  } else {
+    scrollPos['receipt-edit'] = 0;
+    editingReceipt = {
+      id: genId(), date: parsed.date, store: parsed.store, settled: false,
+      tax: parsed.tax ? String(parsed.tax) : '', taxMode: DATA.taxMode === 'proportional' ? 'proportional' : 'half',
+      people: ['Me', 'Partner'], payer: 0,
+      items: parsed.items.map(it => ({ name: it.name, price: it.price, who: [0] })),
+      _new: true
+    };
+    showToast('Imported ' + parsed.items.length + ' items — tap chips to share');
+    render();
+  }
+}
+
+// ============================================================
 // DINING TAB
 // ============================================================
 function renderDining() {
@@ -971,6 +1104,8 @@ function renderDining() {
   if (!diningDate) diningDate = todayStr();
 
   let html = '';
+
+  html += renderPasteCard('dining');
 
   // Place + Date
   html += `<div class="card">
@@ -1588,6 +1723,7 @@ function renderReceipts() {
 
   html += `<button class="btn btn-primary" onclick="newReceipt()">+ New Receipt</button>
   <div class="section-gap"></div>`;
+  html += renderPasteCard('receipts');
 
   if (DATA.receipts.length === 0) {
     html += `<div class="card" style="text-align:center;padding:24px 14px">
@@ -2443,7 +2579,7 @@ function renderSettings() {
 
   // About
   html += `<div class="card" style="text-align:center">
-    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.2</div>
+    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.3</div>
     <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Data stored locally on this device</div>
   </div>`;
 
