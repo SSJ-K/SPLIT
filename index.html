@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Split">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#f5f5f0">
 <title>Split Calculator</title>
 <style>
 :root {
@@ -103,6 +103,10 @@ body {
   padding: calc(var(--safe-top) + 8px) 16px 12px;
   background: var(--bg);
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  isolation: isolate;
+  transform: translateZ(0);
 }
 .header h1 {
   font-size: 28px;
@@ -2653,7 +2657,7 @@ function renderSettings() {
 
   // About
   html += `<div class="card" style="text-align:center">
-    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.6</div>
+    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.7</div>
     <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Data stored locally on this device</div>
   </div>`;
 
@@ -2665,7 +2669,7 @@ function toggleTheme() {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
   if (isDark) {
     document.documentElement.removeAttribute('data-theme');
-    document.querySelector('meta[name="theme-color"]').content = '#ffffff';
+    document.querySelector('meta[name="theme-color"]').content = '#f5f5f0';
     DATA.theme = 'light';
   } else {
     document.documentElement.setAttribute('data-theme', 'dark');
@@ -2718,7 +2722,7 @@ function importAllJSON() {
         document.querySelector('meta[name="theme-color"]').content = '#2a2a2a';
       } else {
         document.documentElement.removeAttribute('data-theme');
-        document.querySelector('meta[name="theme-color"]').content = '#ffffff';
+        document.querySelector('meta[name="theme-color"]').content = '#f5f5f0';
       }
       splitPresetId = null;
       diningEditingId = null;
