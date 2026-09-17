@@ -72,11 +72,12 @@ body {
   margin: 0 auto;
 }
 
-/* TAB BAR */
+/* TAB BAR (bottom) */
 .tab-bar {
   display: flex;
   background: var(--bg-card);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  padding-bottom: var(--safe-bottom);
   flex-shrink: 0;
 }
 .tab {
@@ -99,7 +100,7 @@ body {
 
 /* HEADER */
 .header {
-  padding: 8px 16px 12px;
+  padding: calc(var(--safe-top) + 8px) 16px 12px;
   background: var(--bg);
   flex-shrink: 0;
 }
@@ -120,7 +121,7 @@ body {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 0 16px calc(16px + var(--safe-bottom));
+  padding: 0 16px 16px;
 }
 
 /* CARDS */
@@ -402,6 +403,59 @@ input[type="number"] { -moz-appearance: textfield; }
   border-color: var(--accent);
 }
 
+.who-select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 38px;
+  padding: 0 26px 0 10px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  border: 1px solid var(--border);
+  background-color: var(--bg-input);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23808080' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px 12px;
+  color: var(--text);
+  cursor: pointer;
+  width: 104px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.who-select.on { background-color: var(--accent-light); color: var(--accent); border-color: transparent; }
+.who-select.some { background-color: var(--yellow-light); color: #8a6d00; border-color: transparent; }
+[data-theme="dark"] .who-select.some { color: var(--yellow); }
+.who-select:focus { outline: 2px solid var(--accent); }
+
+/* UPDATE BANNER */
+.update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(72px + var(--safe-bottom));
+  transform: translateX(-50%) translateY(120px);
+  background: var(--accent);
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 998;
+  border: none;
+  font-family: var(--font-body);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  cursor: pointer;
+  white-space: nowrap;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.update-banner.show { transform: translateX(-50%) translateY(0); visibility: visible; opacity: 1; pointer-events: auto; }
+
 /* TOAST */
 .toast {
   position: fixed;
@@ -598,7 +652,7 @@ input[type="number"] { -moz-appearance: textfield; }
 .scroll-fabs {
   position: fixed;
   right: calc(50vw - min(50vw, 215px) + 12px);
-  bottom: calc(14px + var(--safe-bottom));
+  bottom: calc(72px + var(--safe-bottom));
   display: none;
   flex-direction: column;
   gap: 8px;
@@ -625,11 +679,12 @@ input[type="number"] { -moz-appearance: textfield; }
 </head>
 <body>
 <div id="app">
-  <div class="tab-bar" id="tab-bar"></div>
   <div class="header" id="header"></div>
   <div class="content" id="main-content"></div>
+  <div class="tab-bar" id="tab-bar"></div>
 </div>
 <div class="toast" id="toast"></div>
+<button class="update-banner" id="update-banner" onclick="location.reload()">New version ready — tap to reload</button>
 <div class="scroll-fabs" id="scroll-fabs">
   <button class="scroll-fab" onclick="scrollContentTo('top')" aria-label="Scroll to top">↑</button>
   <button class="scroll-fab" onclick="scrollContentTo('bottom')" aria-label="Scroll to bottom">↓</button>
@@ -1862,20 +1917,24 @@ function renderReceiptEdit() {
   html += `<div class="card">
     <div class="form-group" style="margin-bottom:8px">
       <label class="form-label">Items</label>
-      <div class="helper-text">Tap the chip to cycle: ÷ All → Mine → Some…</div>
+      <div class="helper-text">Choose who each item is for</div>
     </div>`;
   r.items.forEach((it, i) => {
     const isAll = it.who === 'all';
-    const isMine = Array.isArray(it.who) && it.who.length === 1 && it.who[0] === 0;
-    const isCustom = !isAll && !isMine;
-    const label = isAll ? '÷ All' : (isMine ? 'Mine' : '÷ ' + it.who.length);
+    const isSolo = Array.isArray(it.who) && it.who.length === 1;
+    const isCustom = !isAll && !isSolo;
+    const selValue = isAll ? 'all' : (isSolo ? 'p' + it.who[0] : 'multi');
+    const selClass = isAll ? 'on' : (isCustom ? 'some' : '');
+    const opts = `<option value="all"${isAll ? ' selected' : ''}>÷ All</option>` +
+      names.map((n, pi) => `<option value="p${pi}"${selValue === 'p' + pi ? ' selected' : ''}>${escHtml(n)}</option>`).join('') +
+      (names.length > 2 ? `<option value="multi"${isCustom ? ' selected' : ''}>Some…</option>` : '');
     html += `<div class="item-row">
       <div class="item-row-top" style="margin-bottom:${isCustom ? '6px' : '0'}">
         <input type="text" class="form-input" placeholder="Item" value="${escHtml(it.name)}" oninput="editingReceipt.items[${i}].name=this.value">
         <div class="amount-input-wrap" style="width:84px;flex-shrink:0">
           <input type="number" inputmode="decimal" class="form-input item-price" style="padding-left:22px;font-size:14px" placeholder="0.00" value="${escHtml(it.price)}" oninput="editingReceipt.items[${i}].price=this.value;renderReceiptResults()">
         </div>
-        <div class="shared-chip ${isAll ? 'on' : ''}${isCustom ? ' some' : ''}" onclick="cycleItemWho(${i})">${label}</div>
+        <select class="who-select ${selClass}" onchange="setItemWho(${i}, this.value)" aria-label="Who is this item for">${opts}</select>
         ${r.items.length > 1 ? `<button class="remove-person" onclick="removeReceiptItem(${i})">×</button>` : ''}
       </div>
       ${isCustom ? `<div class="item-assignees">${names.map((n, pi) => `<div class="item-assignee-chip ${it.who.includes(pi) ? 'active' : ''}" onclick="toggleItemWho(${i},${pi})">${escHtml(n)}</div>`).join('')}</div>` : ''}
@@ -1958,6 +2017,20 @@ function renderReceiptResults() {
   el.innerHTML = h;
 }
 
+function setItemWho(i, value) {
+  haptic();
+  const it = editingReceipt.items[i];
+  if (value === 'all') {
+    it.who = 'all';
+  } else if (value === 'multi') {
+    // Seed with the previous selection, or everyone, so the user unticks rather than starts from scratch
+    it.who = Array.isArray(it.who) && it.who.length > 1 ? it.who.slice() : editingReceipt.people.map((_, idx) => idx);
+  } else {
+    it.who = [parseInt(value.slice(1), 10)];
+  }
+  render();
+}
+
 function cycleItemWho(i) {
   haptic();
   const it = editingReceipt.items[i];
@@ -1979,6 +2052,7 @@ function toggleItemWho(i, pi) {
   if (idx === -1) it.who.push(pi);
   else it.who.splice(idx, 1);
   if (it.who.length === 0) it.who = [0];
+  it.who.sort((a, b) => a - b);
   render();
 }
 
@@ -2579,7 +2653,7 @@ function renderSettings() {
 
   // About
   html += `<div class="card" style="text-align:center">
-    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.3</div>
+    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.6</div>
     <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Data stored locally on this device</div>
   </div>`;
 
@@ -2690,6 +2764,19 @@ if (DATA.theme === 'dark') {
 }
 
 render();
+
+// --- OFFLINE / SERVICE WORKER ---
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (e.data && e.data.type === 'UPDATE_READY') {
+        // Never interrupt an in-progress edit; drafts are saved so reload is safe, but let the user pick the moment
+        $('update-banner').classList.add('show');
+      }
+    });
+  });
+}
 </script>
 </body>
 </html>
