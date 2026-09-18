@@ -2657,7 +2657,7 @@ function renderSettings() {
 
   // About
   html += `<div class="card" style="text-align:center">
-    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.8</div>
+    <div style="font-size:12px;color:var(--text-tertiary)">Split Calculator v1.9</div>
     <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Data stored locally on this device</div>
   </div>`;
 
@@ -2772,7 +2772,11 @@ render();
 // --- OFFLINE / SERVICE WORKER ---
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
+      // Check for a new worker on every launch and whenever the app comes back to the foreground
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', e => {
       if (e.data && e.data.type === 'UPDATE_READY') {
         // Never interrupt an in-progress edit; drafts are saved so reload is safe, but let the user pick the moment
