@@ -1,6 +1,6 @@
 // SPLIT service worker — caches the app shell so it opens offline / on slow VPN.
 // Bump CACHE_VERSION whenever index.html changes so old shells get evicted.
-const CACHE_VERSION = 'split-v1.7';
+const CACHE_VERSION = 'split-v1.8';
 const SHELL = ['./', './index.html'];
 
 self.addEventListener('install', e => {
