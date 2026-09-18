@@ -1,16 +1,22 @@
 // SPLIT service worker — caches the app shell so it opens offline / on slow VPN.
 // Bump CACHE_VERSION whenever index.html changes so old shells get evicted.
-const CACHE_VERSION = 'split-v1.8';
+const CACHE_VERSION = 'split-v1.9';
 const SHELL = ['./', './index.html'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE_VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE_VERSION)
+      .then(c => Promise.all(SHELL.map(u => fetch(u, { cache: 'reload' }).then(r => r.ok && c.put(u, r)))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_VERSION).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then(clients => clients.forEach(c => c.postMessage({ type: 'UPDATE_READY' })))
   );
 });
 
@@ -21,7 +27,8 @@ self.addEventListener('fetch', e => {
   e.respondWith(
     caches.open(CACHE_VERSION).then(async cache => {
       const cached = await cache.match(e.request, { ignoreSearch: true });
-      const network = fetch(e.request).then(async res => {
+      // cache:'reload' bypasses Safari's HTTP cache so we really see GitHub's latest copy
+      const network = fetch(e.request, { cache: 'reload' }).then(async res => {
         if (res && res.ok) {
           const fresh = res.clone();
           if (cached) {
